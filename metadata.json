@@ -1,0 +1,8 @@
+{
+  "name": "Remix My Chess Work Manager",
+  "description": "Private personal Chess Work Management PWA for tracking daily classes, homework, class statistics, and WhatsApp reports.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e293b" />
+      <stop offset="100%" stop-color="#0f172a" />
+    </linearGradient>
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fbbf24" />
+      <stop offset="100%" stop-color="#d97706" />
+    </linearGradient>
+    <linearGradient id="pieceGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" />
+      <stop offset="100%" stop-color="#e2e8f0" />
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#000000" flood-opacity="0.45" />
+    </filter>
+  </defs>
+  <!-- Background with subtle border -->
+  <rect width="512" height="512" rx="108" fill="url(#bgGrad)" />
+  <!-- Subtle chessboard grid in background -->
+  <g opacity="0.08" stroke="#ffffff" stroke-width="2">
+    <line x1="128" y1="0" x2="128" y2="512" />
+    <line x1="256" y1="0" x2="256" y2="512" />
+    <line x1="384" y1="0" x2="384" y2="512" />
+    <line x1="0" y1="128" x2="512" y2="128" />
+    <line x1="0" y1="256" x2="512" y2="256" />
+    <line x1="0" y1="384" x2="512" y2="384" />
+  </g>
+  <!-- Gold Accent Ring -->
+  <circle cx="256" cy="256" r="190" fill="none" stroke="url(#goldGrad)" stroke-width="8" opacity="0.85" />
+  <!-- Chess Knight / Pawn Silhouette with high precision path -->
+  <g filter="url(#glow)" transform="translate(256, 256) scale(0.68) translate(-256, -256)">
+    <!-- Base -->
+    <path d="M140 400 H372 C372 400 360 360 340 348 H172 C152 360 140 400 140 400 Z" fill="url(#pieceGrad)" />
+    <!-- Pedestal ring -->
+    <rect x="160" y="336" width="192" height="20" rx="6" fill="#cbd5e1" />
+    <!-- Body / Neck -->
+    <path d="M176 336 C180 290 200 250 216 220 C206 200 200 176 210 140 C216 120 236 100 260 92 C270 88 284 94 286 106 C290 120 280 134 274 146 C296 142 320 152 332 170 C344 190 336 214 316 230 C336 270 340 300 336 336 Z" fill="url(#pieceGrad)" />
+    <!-- Mane details -->
+    <path d="M214 136 C200 160 196 190 200 220" stroke="#94a3b8" stroke-width="8" stroke-linecap="round" fill="none" />
+    <path d="M246 112 C236 130 234 150 236 170" stroke="#94a3b8" stroke-width="6" stroke-linecap="round" fill="none" />
+    <!-- Eye -->
+    <circle cx="294" cy="180" r="10" fill="#0f172a" />
+    <circle cx="296" cy="178" r="3" fill="#ffffff" />
+    <!-- Star badge indicating Manager / Pro -->
+    <polygon points="256,268 264,286 284,286 268,298 274,316 256,304 238,316 244,298 228,286 248,286" fill="url(#goldGrad)" />
+  </g>
+</svg>
