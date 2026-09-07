@@ -8,7 +8,7 @@ import { createClient } from '@supabase/supabase-js';
 dotenv.config();
 
 const app = express();
-const PORT = 3000;
+const PORT = parseInt(process.env.PORT || '3000', 10);
 
 app.use(express.json());
 
@@ -318,7 +318,8 @@ async function startServer() {
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    app.get('*', (req, res) => {
+    // SPA fallback: only for non-API routes
+    app.get(/^(?!\/api).*$/, (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
