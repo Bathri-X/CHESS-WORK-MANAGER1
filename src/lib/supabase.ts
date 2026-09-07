@@ -3,9 +3,10 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 const STORAGE_KEY_URL = 'chess_work_supabase_url';
 const STORAGE_KEY_ANON_KEY = 'chess_work_supabase_anon_key';
 
-let cachedClient: SupabaseClient | null = null;
-let cachedUrl = '';
-let cachedKey = '';
+// Module-level singleton — only one GoTrueClient ever exists at a time
+let _client: SupabaseClient | null = null;
+let _clientUrl = '';
+let _clientKey = '';
 
 /**
  * Validates if a string is a standard RFC4122 UUID
@@ -16,7 +17,7 @@ export function isValidUuid(id?: string | null): boolean {
 }
 
 /**
- * Generates a standard RFC4122 v4 UUID with fallback if crypto.randomUUID is not available
+ * Generates a standard RFC4122 v4 UUID with fallback
  */
 export function generateUuid(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -37,24 +38,29 @@ export function generateUuid(): string {
  * Clean and format Supabase project URL
  */
 export function cleanSupabaseUrl(rawUrl: string): string {
-  let cleaned = (rawUrl || '').trim();
-  // Remove any trailing slashes
-  cleaned = cleaned.replace(/\/+$/, '');
-  return cleaned;
+  return (rawUrl || '').trim().replace(/\/+$/, '');
 }
 
+/**
+ * Get credentials — localStorage takes priority over env vars so
+ * the in-app Setup modal can override the defaults at runtime.
+ */
 export function getCustomSupabaseCredentials(): { url: string; anonKey: string } {
+  // localStorage overrides env vars (allows in-app credential update without restart)
   const url =
-    import.meta.env.VITE_SUPABASE_URL ||
     localStorage.getItem(STORAGE_KEY_URL) ||
+    (import.meta.env.VITE_SUPABASE_URL as string | undefined) ||
     '';
   const anonKey =
-    import.meta.env.VITE_SUPABASE_ANON_KEY ||
     localStorage.getItem(STORAGE_KEY_ANON_KEY) ||
+    (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) ||
     '';
   return { url: cleanSupabaseUrl(url), anonKey: anonKey.trim() };
 }
 
+/**
+ * Persist credentials to localStorage and reset the singleton client
+ */
 export function saveCustomSupabaseCredentials(url: string, anonKey: string) {
   const cleanUrl = cleanSupabaseUrl(url);
   const cleanKey = (anonKey || '').trim();
@@ -65,19 +71,21 @@ export function saveCustomSupabaseCredentials(url: string, anonKey: string) {
   if (cleanKey) localStorage.setItem(STORAGE_KEY_ANON_KEY, cleanKey);
   else localStorage.removeItem(STORAGE_KEY_ANON_KEY);
 
-  cachedClient = null; // reset client
-  cachedUrl = '';
-  cachedKey = '';
+  // Destroy the singleton so next getSupabase() call creates a fresh client
+  if (_client) {
+    try { _client.auth.stopAutoRefresh(); } catch { /* ignore */ }
+  }
+  _client = null;
+  _clientUrl = '';
+  _clientKey = '';
 
-  // Proactively inform backend server if running
+  // Also inform the backend server
   try {
     fetch('/api/supabase/save-config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url: cleanUrl, anonKey: cleanKey }),
-    }).catch(() => {
-      // Ignore if offline or API not available
-    });
+    }).catch(() => {/* Ignore if offline */});
   } catch {
     // Ignore
   }
@@ -88,27 +96,40 @@ export function isSupabaseConfigured(): boolean {
   return Boolean(url && anonKey && (url.startsWith('https://') || url.startsWith('http://')));
 }
 
+/**
+ * Returns the singleton Supabase client. Creates it only if credentials
+ * changed or it doesn't exist yet — prevents multiple GoTrueClient instances.
+ */
 export function getSupabase(): SupabaseClient | null {
   const { url, anonKey } = getCustomSupabaseCredentials();
   if (!url || !anonKey || (!url.startsWith('https://') && !url.startsWith('http://'))) {
     return null;
   }
 
-  if (cachedClient && cachedUrl === url && cachedKey === anonKey) {
-    return cachedClient;
+  // Return cached client if credentials haven't changed
+  if (_client && _clientUrl === url && _clientKey === anonKey) {
+    return _client;
+  }
+
+  // Tear down old client before creating new one
+  if (_client) {
+    try { _client.auth.stopAutoRefresh(); } catch { /* ignore */ }
+    _client = null;
   }
 
   try {
-    cachedClient = createClient(url, anonKey, {
+    _client = createClient(url, anonKey, {
       auth: {
         persistSession: true,
         autoRefreshToken: true,
         detectSessionInUrl: true,
+        // Use a unique storageKey per project URL to avoid collisions
+        storageKey: `chess_sb_auth_${url.replace(/[^a-z0-9]/gi, '_')}`,
       },
     });
-    cachedUrl = url;
-    cachedKey = anonKey;
-    return cachedClient;
+    _clientUrl = url;
+    _clientKey = anonKey;
+    return _client;
   } catch (err) {
     console.error('Failed to initialize Supabase client:', err);
     return null;
@@ -116,7 +137,8 @@ export function getSupabase(): SupabaseClient | null {
 }
 
 /**
- * Tests connection to a Supabase project and checks if the 'batches' table exists.
+ * Tests connection via the backend API (/api/supabase/test) to avoid
+ * creating a competing GoTrueClient in the browser.
  */
 export async function testSupabaseConnection(
   testUrl?: string,
@@ -141,60 +163,24 @@ export async function testSupabaseConnection(
   }
 
   try {
-    const client = createClient(url, anonKey, {
-      auth: {
-        persistSession: false,
-        autoRefreshToken: false,
-      },
+    // Proxy through backend to avoid a second GoTrueClient instance
+    const res = await fetch('/api/supabase/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, anonKey }),
     });
 
-    // 1. Verify auth endpoint accessibility
-    const { error: authError } = await client.auth.getSession();
-    if (authError) {
-      return {
-        success: false,
-        message: `Supabase Auth error: ${authError.message}`,
-        tableExists: false,
-      };
-    }
-
-    // 2. Query batches table to check if table exists and RLS is functional
-    const { error: tableError } = await client.from('batches').select('id').limit(1);
-
-    if (tableError) {
-      // PostgREST 404 or relation does not exist
-      if (
-        tableError.message.includes('relation') ||
-        tableError.message.includes('does not exist') ||
-        tableError.code === '42P01' ||
-        tableError.code === 'PGRST204'
-      ) {
-        return {
-          success: true,
-          tableExists: false,
-          message: 'Connected to Supabase! However, the "batches" table does not exist yet. Please run the SQL schema in Step 1.',
-        };
-      }
-
-      // If RLS blocked anon read, that still confirms table exists!
-      return {
-        success: true,
-        tableExists: true,
-        message: `Connected to Supabase! Batches table found (RLS policy active: ${tableError.message}).`,
-      };
-    }
-
+    const data = await res.json();
     return {
-      success: true,
-      tableExists: true,
-      message: 'Connected to Supabase! Batches table exists and is ready for sync.',
+      success: data.success ?? false,
+      message: data.message ?? 'Unknown response from server.',
+      tableExists: data.tableExists ?? false,
     };
   } catch (err: any) {
     return {
       success: false,
       tableExists: false,
-      message: `Connection failed: ${err?.message || 'Network error reaching Supabase.'}`,
+      message: `Connection failed: ${err?.message || 'Network error reaching backend.'}`,
     };
   }
 }
-

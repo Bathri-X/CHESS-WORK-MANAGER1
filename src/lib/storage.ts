@@ -117,7 +117,7 @@ export async function upsertBatch(batch: Batch, userId: string): Promise<Batch> 
     created_at: batch.created_at || nowIso,
   };
 
-  // Update local cache immediately
+  // Update local cache immediately (optimistic update)
   const localBatches = getLocalCachedBatches();
   const index = localBatches.findIndex((b) => b.id === finalBatch.id || b.id === batch.id);
   if (index >= 0) {
@@ -127,10 +127,22 @@ export async function upsertBatch(batch: Batch, userId: string): Promise<Batch> 
   }
   setLocalCachedBatches(localBatches);
 
-  // Sync to Supabase ONLY if client exists and userId is a valid UUID
-  if (supabase && isValidUuid(userId)) {
-    try {
-      const { error } = await supabase.from('batches').upsert({
+  // Sync to Supabase only if configured AND user is a real authenticated UUID
+  if (!supabase) {
+    console.info('[Supabase] Not configured — batch saved locally only.');
+    return finalBatch;
+  }
+  if (!isValidUuid(userId)) {
+    console.warn(
+      '[Supabase] Skipping cloud sync — user is not authenticated. ' +
+      'Sign in via the Login button to sync batches to Supabase.'
+    );
+    return finalBatch;
+  }
+
+  try {
+    const { error } = await supabase.from('batches').upsert(
+      {
         id: finalBatch.id,
         user_id: finalBatch.user_id,
         work_date: finalBatch.work_date,
@@ -142,14 +154,17 @@ export async function upsertBatch(batch: Batch, userId: string): Promise<Batch> 
         class_type: finalBatch.class_type,
         created_at: finalBatch.created_at,
         updated_at: finalBatch.updated_at,
-      });
+      },
+      { onConflict: 'id' }
+    );
 
-      if (error) {
-        console.error('Supabase upsert error:', error.message);
-      }
-    } catch (err: any) {
-      console.warn('Supabase sync warning (data saved locally):', err?.message);
+    if (error) {
+      console.error('[Supabase] Upsert error:', error.message, error.code);
+    } else {
+      console.info('[Supabase] Batch synced successfully:', finalBatch.id);
     }
+  } catch (err: any) {
+    console.warn('[Supabase] Sync warning (data saved locally):', err?.message);
   }
 
   return finalBatch;
@@ -177,32 +192,32 @@ export async function migrateLocalBatchesToCloud(authUserId: string): Promise<Ba
 
     const existingCloudIds = new Set((cloudData || []).map((b: any) => b.id));
 
-    // Upload local batches that are not yet in cloud or were created offline
-    const toUpload = localBatches.map((b) => ({
-      ...b,
-      id: isValidUuid(b.id) ? b.id : generateUuid(),
-      user_id: authUserId,
-      homework: b.homework || '',
-      created_at: b.created_at || new Date().toISOString(),
-      updated_at: b.updated_at || new Date().toISOString(),
-    }));
+    // Upload ALL local batches — upsert wins on conflict so local edits merge correctly
+    const toUpload = localBatches
+      .filter((b) => b.user_id === authUserId || b.user_id === 'local_private_user' || !isValidUuid(b.user_id))
+      .map((b) => ({
+        id: isValidUuid(b.id) ? b.id : generateUuid(),
+        user_id: authUserId,
+        work_date: b.work_date,
+        start_time: b.start_time,
+        end_time: b.end_time,
+        class_name: b.class_name,
+        topic: b.topic,
+        homework: b.homework || '',
+        class_type: b.class_type,
+        created_at: b.created_at || new Date().toISOString(),
+        updated_at: b.updated_at || new Date().toISOString(),
+      }));
 
-    // Perform upsert for batches
-    for (const b of toUpload) {
-      if (!existingCloudIds.has(b.id)) {
-        await supabase.from('batches').upsert({
-          id: b.id,
-          user_id: b.user_id,
-          work_date: b.work_date,
-          start_time: b.start_time,
-          end_time: b.end_time,
-          class_name: b.class_name,
-          topic: b.topic,
-          homework: b.homework,
-          class_type: b.class_type,
-          created_at: b.created_at,
-          updated_at: b.updated_at,
-        });
+    // Bulk upsert all local batches to Supabase
+    if (toUpload.length > 0) {
+      const { error: upsertError } = await supabase
+        .from('batches')
+        .upsert(toUpload, { onConflict: 'id' });
+      if (upsertError) {
+        console.error('[Supabase] Migration upsert error:', upsertError.message);
+      } else {
+        console.info(`[Supabase] Migrated ${toUpload.length} batches to cloud.`);
       }
     }
 

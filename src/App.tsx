@@ -19,7 +19,7 @@ import {
   setLocalCachedBatches,
   migrateLocalBatchesToCloud,
 } from './lib/storage';
-import { getSupabase, isSupabaseConfigured, generateUuid } from './lib/supabase';
+import { getSupabase, isSupabaseConfigured, generateUuid, isValidUuid } from './lib/supabase';
 import { Navbar } from './components/Navbar';
 import { StatsTracker } from './components/StatsTracker';
 import { DateNavigation } from './components/DateNavigation';
@@ -83,8 +83,12 @@ export default function App() {
     saveTrackingPeriod(newPeriod);
   };
 
-  // Seed sample starter batches if empty on first launch
-  const seedStarterBatchesIfEmpty = useCallback((existing: Batch[]) => {
+  // Seed sample starter batches ONLY in local/offline mode (not for authenticated Supabase users)
+  const seedStarterBatchesIfEmpty = useCallback((existing: Batch[], forUserId?: string) => {
+    // Never seed for authenticated Supabase users — their DB might just be empty
+    if (forUserId && isValidUuid(forUserId)) {
+      return existing;
+    }
     if (existing.length === 0) {
       const today = getTodayString();
       const sampleBatches: Batch[] = [
@@ -139,18 +143,18 @@ export default function App() {
     setIsLoading(true);
     try {
       const loaded = await fetchAllBatches(user?.id);
-      const withSeed = seedStarterBatchesIfEmpty(loaded);
+      const withSeed = seedStarterBatchesIfEmpty(loaded, user?.id);
       setBatches(withSeed);
     } catch (err: any) {
       console.warn('Error loading batches:', err);
       const cached = getLocalCachedBatches();
-      setBatches(seedStarterBatchesIfEmpty(cached));
+      setBatches(seedStarterBatchesIfEmpty(cached, user?.id));
     } finally {
       setIsLoading(false);
     }
   }, [user?.id, seedStarterBatchesIfEmpty]);
 
-  // Check Supabase Auth Session on mount
+  // Check Supabase Auth Session on mount — auto-restore login if token is still valid
   useEffect(() => {
     const supabase = getSupabase();
     if (supabase) {
@@ -161,6 +165,7 @@ export default function App() {
             email: data.session.user.email || 'user@supabase.io',
           };
           setUser(profile);
+          setSupabaseConnected(true);
           localStorage.setItem('chess_work_local_user', JSON.stringify(profile));
         }
       });
@@ -173,18 +178,20 @@ export default function App() {
               email: session.user.email || 'user@supabase.io',
             };
             setUser(profile);
+            setSupabaseConnected(true);
             localStorage.setItem('chess_work_local_user', JSON.stringify(profile));
             if (event === 'SIGNED_IN') {
               const synced = await migrateLocalBatchesToCloud(session.user.id);
               setBatches(synced);
             }
-          } else {
+          } else if (event === 'SIGNED_OUT') {
             // Revert to local user
             const localUser: UserProfile = {
               id: 'local_private_user',
               email: 'coach@chessmanager.private',
             };
             setUser(localUser);
+            setSupabaseConnected(isSupabaseConfigured());
             localStorage.setItem('chess_work_local_user', JSON.stringify(localUser));
           }
         }
