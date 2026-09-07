@@ -1,0 +1,26 @@
+/*
+  Content-Type: text/html; charset=UTF-8
+  X-Content-Type-Options: nosniff
+
+/*.js
+  Content-Type: application/javascript; charset=utf-8
+  X-Content-Type-Options: nosniff
+
+/*.mjs
+  Content-Type: application/javascript; charset=utf-8
+  X-Content-Type-Options: nosniff
+
+/*.css
+  Content-Type: text/css; charset=utf-8
+
+/*.wasm
+  Content-Type: application/wasm
+
+/assets/*.js
+  Content-Type: application/javascript; charset=utf-8
+  X-Content-Type-Options: nosniff
+  Cache-Control: public, max-age=31536000, immutable
+
+/assets/*.css
+  Content-Type: text/css; charset=utf-8
+  Cache-Control: public, max-age=31536000, immutable

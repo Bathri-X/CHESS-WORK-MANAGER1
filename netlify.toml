@@ -1,0 +1,49 @@
+[build]
+  command = "vite build"
+  publish = "dist"
+  functions = "netlify/functions"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# Route all /api/* calls to Netlify serverless functions
+[[redirects]]
+  from = "/api/health"
+  to = "/.netlify/functions/health"
+  status = 200
+
+[[redirects]]
+  from = "/api/config-status"
+  to = "/.netlify/functions/config-status"
+  status = 200
+
+[[redirects]]
+  from = "/api/supabase/status"
+  to = "/.netlify/functions/supabase-status"
+  status = 200
+
+[[redirects]]
+  from = "/api/supabase/test"
+  to = "/.netlify/functions/supabase-test"
+  status = 200
+
+[[redirects]]
+  from = "/api/supabase/save-config"
+  to = "/.netlify/functions/supabase-save-config"
+  status = 200
+
+[[redirects]]
+  from = "/api/verify-delete-pin"
+  to = "/.netlify/functions/verify-delete-pin"
+  status = 200
+
+[[redirects]]
+  from = "/api/batches/delete"
+  to = "/.netlify/functions/batches-delete"
+  status = 200
+
+# SPA fallback — all other routes serve index.html
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
