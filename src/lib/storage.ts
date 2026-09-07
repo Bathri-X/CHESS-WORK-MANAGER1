@@ -5,6 +5,18 @@ import { parseISODate } from './dateUtils';
 const LOCAL_BATCHES_KEY = 'chess_work_local_batches';
 export const TRACKING_PREFERENCE_KEY = 'chess_work_tracking_view_pref';
 
+// Per-user migration flag — ensures cloud migration runs EXACTLY ONCE per account
+const getMigrationFlagKey = (userId: string) => `chess_work_migrated_${userId}`;
+
+function hasMigratedToCloud(userId: string): boolean {
+  return localStorage.getItem(getMigrationFlagKey(userId)) === 'true';
+}
+
+function markMigratedToCloud(userId: string): void {
+  localStorage.setItem(getMigrationFlagKey(userId), 'true');
+}
+
+
 /**
  * Get stored tracking period preference (defaults to 'MONTHLY')
  */
@@ -178,23 +190,23 @@ export async function migrateLocalBatchesToCloud(authUserId: string): Promise<Ba
   const supabase = getSupabase();
   if (!supabase) return getLocalCachedBatches();
 
+  // GUARD: only migrate once per user account to prevent duplicates on re-login/refresh
+  if (hasMigratedToCloud(authUserId)) {
+    console.info('[Supabase] Migration already done for this user, fetching cloud data.');
+    const cloudBatches = await fetchAllBatches(authUserId);
+    // Always replace local cache with authoritative cloud data
+    setLocalCachedBatches(cloudBatches);
+    return cloudBatches;
+  }
+
   try {
     const localBatches = getLocalCachedBatches();
-    if (localBatches.length === 0) {
-      return await fetchAllBatches(authUserId);
-    }
 
-    // Fetch existing batches in cloud
-    const { data: cloudData } = await supabase
-      .from('batches')
-      .select('id')
-      .eq('user_id', authUserId);
-
-    const existingCloudIds = new Set((cloudData || []).map((b: any) => b.id));
-
-    // Upload ALL local batches — upsert wins on conflict so local edits merge correctly
+    // Only migrate batches that were created locally (not already cloud-synced rows)
+    // Filter out any batch already owned by a real UUID user (already synced)
     const toUpload = localBatches
-      .filter((b) => b.user_id === authUserId || b.user_id === 'local_private_user' || !isValidUuid(b.user_id))
+      .filter((b) => !isValidUuid(b.user_id) || b.user_id === authUserId)
+      .filter((b) => b.class_name && b.work_date && b.start_time) // must have required fields
       .map((b) => ({
         id: isValidUuid(b.id) ? b.id : generateUuid(),
         user_id: authUserId,
@@ -209,7 +221,6 @@ export async function migrateLocalBatchesToCloud(authUserId: string): Promise<Ba
         updated_at: b.updated_at || new Date().toISOString(),
       }));
 
-    // Bulk upsert all local batches to Supabase
     if (toUpload.length > 0) {
       const { error: upsertError } = await supabase
         .from('batches')
@@ -217,14 +228,19 @@ export async function migrateLocalBatchesToCloud(authUserId: string): Promise<Ba
       if (upsertError) {
         console.error('[Supabase] Migration upsert error:', upsertError.message);
       } else {
-        console.info(`[Supabase] Migrated ${toUpload.length} batches to cloud.`);
+        console.info(`[Supabase] Migrated ${toUpload.length} local batches to cloud.`);
       }
     }
 
-    // Re-fetch everything from Supabase for a clean synced state
-    return await fetchAllBatches(authUserId);
+    // Mark migration as done so it NEVER runs again for this user
+    markMigratedToCloud(authUserId);
+
+    // Fetch the authoritative cloud state and replace local cache
+    const cloudBatches = await fetchAllBatches(authUserId);
+    setLocalCachedBatches(cloudBatches);
+    return cloudBatches;
   } catch (err) {
-    console.warn('Error during batch cloud migration:', err);
+    console.warn('[Supabase] Error during batch cloud migration:', err);
     return getLocalCachedBatches();
   }
 }
